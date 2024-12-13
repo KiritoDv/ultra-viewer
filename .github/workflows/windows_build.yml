@@ -17,6 +17,10 @@ jobs:
         run: |
           cmake -S . -B "build/x64" -G "Visual Studio 17 2022" -T v143 -A x64 -DCMAKE_BUILD_TYPE=Release
           cmake --build ./build/x64
+      - name: Create Package
+        run: |
+          (cd build/x64 && cpack)
+          cd ../..
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
