@@ -6,6 +6,7 @@
 #include <libultra/gbi.h>
 #include "math/matrix.h"
 #include "Fast3D/Fast3dWindow.h"
+#include <imgui.h>
 
 ViewerApp* ViewerApp::Instance = new ViewerApp();
 
@@ -62,7 +63,7 @@ void ViewerApp::Load() {
     const auto files = mgr->GetArchiveManager()->ListFiles("*");
 
     for(auto& file : *files){
-        if(file == "version"){
+        if(file == "version" || file == "portversion"){
             continue;
         }
         auto resource = mgr->LoadResourceProcess("__OTR__" + file);
@@ -73,8 +74,8 @@ void ViewerApp::Load() {
         if(metadata == nullptr){
             continue;
         }
-        if(metadata->Type == static_cast<uint32_t>(LUS::ResourceType::DisplayList)){            
-            auto res = std::static_pointer_cast<LUS::DisplayList>(resource);
+        if(metadata->Type == static_cast<uint32_t>(Fast::ResourceType::DisplayList)){
+            auto res = std::static_pointer_cast<Fast::DisplayList>(resource);
             this->LoadedFiles.push_back({ file });
             this->UCodeEntries[file] = res->UCode;
         }

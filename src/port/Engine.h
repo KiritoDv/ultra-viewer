@@ -1,7 +1,7 @@
 #pragma once
 
 #include <vector>
-#include <Fast3D/gfx_pc.h>
+#include <Fast3D/interpreter.h>
 #include "libultraship/src/Context.h"
 
 class GameEngine {
@@ -16,7 +16,7 @@ class GameEngine {
     static void RunCommands(Gfx* Commands);
     static void Destroy();
 };
-
+Fast::Interpreter* GameEngine_GetInterpreter();
 extern float GameEngine_GetAspectRatio();
 extern uint8_t GameEngine_OTRSigCheck(char* imgData);
 extern float OTRGetDimensionFromLeftEdge(float v);

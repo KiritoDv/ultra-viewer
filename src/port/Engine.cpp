@@ -8,7 +8,7 @@
 #include "StringHelper.h"
 #include "Fast3D/Fast3dWindow.h"
 #include "ui/ImguiUI.h"
-#include <Fast3D/gfx_pc.h>
+#include <Fast3D/interpreter.h>
 
 GameEngine* GameEngine::Instance;
 
@@ -27,20 +27,32 @@ GameEngine::GameEngine() {
         }
     }
 
-    this->context = Ship::Context::CreateInstance("Ultra Viewer 64", "uv64", "uviewer.cfg.json", DataFiles, {}, 3, { 32000, 1024, 2480 });
-    context->GetControlDeck()->SetSinglePlayerMappingMode(true);
+    this->context = Ship::Context::CreateUninitializedInstance("Starship", "ship", "starship.cfg.json");
+
+    this->context->InitConfiguration();    // without this line InitConsoleVariables fails at Config::Reload()
+    this->context->InitConsoleVariables(); // without this line the controldeck constructor failes in
+                                           // ShipDeviceIndexMappingManager::UpdateControllerNamesFromConfig()
+    auto controlDeck = std::make_shared<LUS::ControlDeck>(std::vector<CONTROLLERBUTTONS_T>());
+
+    this->context->InitResourceManager(DataFiles, {}, 3); // without this line InitWindow fails in Gui::Init()
+    this->context->InitConsole(); // without this line the GuiWindow constructor fails in ConsoleWindow::InitElement()
+
+    auto window = std::make_shared<Fast::Fast3dWindow>(std::vector<std::shared_ptr<Ship::GuiWindow>>({}));
+
+    auto audioChannelsSetting = Ship::Context::GetInstance()->GetConfig()->GetCurrentAudioChannelsSetting();
+    this->context->Init(DataFiles, {}, 3, { 32000, 1024, 1680, audioChannelsSetting }, window, controlDeck);
 
     auto loader = context->GetResourceManager()->GetResourceLoader();
-    loader->RegisterResourceFactory(std::make_shared<LUS::ResourceFactoryBinaryTextureV0>(), RESOURCE_FORMAT_BINARY, "Texture", static_cast<uint32_t>(LUS::ResourceType::Texture), 0);
-    loader->RegisterResourceFactory(std::make_shared<LUS::ResourceFactoryBinaryTextureV1>(), RESOURCE_FORMAT_BINARY, "Texture", static_cast<uint32_t>(LUS::ResourceType::Texture), 1);
-    loader->RegisterResourceFactory(std::make_shared<LUS::ResourceFactoryBinaryVertexV0>(), RESOURCE_FORMAT_BINARY, "Vertex", static_cast<uint32_t>(LUS::ResourceType::Vertex), 0);
-    loader->RegisterResourceFactory(std::make_shared<LUS::ResourceFactoryXMLVertexV0>(), RESOURCE_FORMAT_XML,
-                                    "Vertex", static_cast<uint32_t>(LUS::ResourceType::Vertex), 0);
-    loader->RegisterResourceFactory(std::make_shared<LUS::ResourceFactoryBinaryDisplayListV0>(), RESOURCE_FORMAT_BINARY, "DisplayList", static_cast<uint32_t>(LUS::ResourceType::DisplayList), 0);
-    loader->RegisterResourceFactory(std::make_shared<LUS::ResourceFactoryXMLDisplayListV0>(), RESOURCE_FORMAT_XML,
-                                    "DisplayList", static_cast<uint32_t>(LUS::ResourceType::DisplayList), 0);
-    loader->RegisterResourceFactory(std::make_shared<LUS::ResourceFactoryBinaryMatrixV0>(), RESOURCE_FORMAT_BINARY, "Matrix", static_cast<uint32_t>(LUS::ResourceType::Matrix), 0);
-    loader->RegisterResourceFactory(std::make_shared<LUS::ResourceFactoryBinaryLightV0>(), RESOURCE_FORMAT_BINARY, "Light", static_cast<uint32_t>(LUS::ResourceType::Light), 0);
+    loader->RegisterResourceFactory(std::make_shared<Fast::ResourceFactoryBinaryTextureV0>(), RESOURCE_FORMAT_BINARY, "Texture", static_cast<uint32_t>(Fast::ResourceType::Texture), 0);
+    loader->RegisterResourceFactory(std::make_shared<Fast::ResourceFactoryBinaryTextureV1>(), RESOURCE_FORMAT_BINARY, "Texture", static_cast<uint32_t>(Fast::ResourceType::Texture), 1);
+    loader->RegisterResourceFactory(std::make_shared<Fast::ResourceFactoryBinaryVertexV0>(), RESOURCE_FORMAT_BINARY, "Vertex", static_cast<uint32_t>(Fast::ResourceType::Vertex), 0);
+    loader->RegisterResourceFactory(std::make_shared<Fast::ResourceFactoryXMLVertexV0>(), RESOURCE_FORMAT_XML,
+                                    "Vertex", static_cast<uint32_t>(Fast::ResourceType::Vertex), 0);
+    loader->RegisterResourceFactory(std::make_shared<Fast::ResourceFactoryBinaryDisplayListV0>(), RESOURCE_FORMAT_BINARY, "DisplayList", static_cast<uint32_t>(Fast::ResourceType::DisplayList), 0);
+    loader->RegisterResourceFactory(std::make_shared<Fast::ResourceFactoryXMLDisplayListV0>(), RESOURCE_FORMAT_XML,
+                                    "DisplayList", static_cast<uint32_t>(Fast::ResourceType::DisplayList), 0);
+    loader->RegisterResourceFactory(std::make_shared<Fast::ResourceFactoryBinaryMatrixV0>(), RESOURCE_FORMAT_BINARY, "Matrix", static_cast<uint32_t>(Fast::ResourceType::Matrix), 0);
+    loader->RegisterResourceFactory(std::make_shared<Fast::ResourceFactoryBinaryLightV0>(), RESOURCE_FORMAT_BINARY, "Light", static_cast<uint32_t>(Fast::ResourceType::Light), 0);
 }
 
 void GameEngine::Create(){
@@ -65,48 +77,49 @@ void GameEngine::StartFrame() const{
 
 void GameEngine::RunCommands(Gfx* Commands) {
     auto wnd = std::dynamic_pointer_cast<Fast::Fast3dWindow>(Ship::Context::GetInstance()->GetWindow());
-    wnd->SetTargetFps(60);
-    wnd->SetMaximumFrameLatency(1);
-    wnd->SetRendererUCode(UcodeHandlers::ucode_f3dex2);
 
-    gfx_run(Commands, {});
-    gfx_end_frame();
-
-    if (ShouldClearTextureCacheAtEndOfFrame) {
-        gfx_texture_cache_clear();
-        ShouldClearTextureCacheAtEndOfFrame = false;
+    if (wnd == nullptr) {
+        return;
     }
+
+    auto interpreter = wnd->GetInterpreterWeak().lock().get();
+
+    // Process window events for resize, mouse, keyboard events
+    wnd->HandleEvents();
+
+    interpreter->mInterpolationIndex = 0;
+
+    wnd->DrawAndRunGraphicsCommands(Commands, {});
 }
 
 // End
 
+Fast::Interpreter* GameEngine_GetInterpreter() {
+    return static_pointer_cast<Fast::Fast3dWindow>(Ship::Context::GetInstance()->GetWindow())
+        ->GetInterpreterWeak()
+        .lock()
+        .get();
+}
+
 float GameEngine_GetAspectRatio() {
+    auto gfx_current_dimensions = GameEngine_GetInterpreter()->mCurDimensions;
     return gfx_current_dimensions.aspect_ratio;
 }
 
 float OTRGetDimensionFromLeftEdge(float v) {
-    return (gfx_native_dimensions.width / 2 - gfx_native_dimensions.height / 2 * GameEngine_GetAspectRatio() + (v));
-}
-
-float OTRGetDimensionFromRightEdge(float v) {
-    return (gfx_native_dimensions.width / 2 + gfx_native_dimensions.height / 2 * GameEngine_GetAspectRatio() -
-            (gfx_native_dimensions.width - v));
-}
-
-uint32_t OTRGetGameRenderWidth() {
-    return gfx_current_dimensions.width;
-}
-
-uint32_t OTRGetGameRenderHeight() {
-    return gfx_current_dimensions.height;
+    return (SCREEN_WIDTH / 2 - SCREEN_HEIGHT / 2 * GameEngine_GetAspectRatio() + (v));
 }
 
 int16_t OTRGetRectDimensionFromLeftEdge(float v) {
-    return ((int)floorf(OTRGetDimensionFromLeftEdge(v)));
+    return ((int) floorf(OTRGetDimensionFromLeftEdge(v)));
+}
+
+float OTRGetDimensionFromRightEdge(float v) {
+    return (SCREEN_WIDTH / 2 + SCREEN_HEIGHT / 2 * GameEngine_GetAspectRatio() - (SCREEN_WIDTH - v));
 }
 
 int16_t OTRGetRectDimensionFromRightEdge(float v) {
-    return ((int)ceilf(OTRGetDimensionFromRightEdge(v)));
+    return ((int) ceilf(OTRGetDimensionFromRightEdge(v)));
 }
 
 static const char* sOtrSignature = "__OTR__";
